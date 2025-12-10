@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import cvxpy as cp
 import numpy as np
+import z3
 
 @dataclass
 class Machine:
@@ -8,10 +9,9 @@ class Machine:
     joltage: list[int]
                 
 
-with open('practice.txt', 'r') as file:
+with open('input.txt', 'r') as file:
     lines = file.readlines()
     machines: list[Machine] = []
-    c_result = 0
     for line in lines:
         line = line.strip().split()
         m = Machine([], [])
@@ -29,27 +29,35 @@ with open('practice.txt', 'r') as file:
                 m.joltage = list(map(int, s))
         machines.append(m)
 
+    result = 0
     for line, m in enumerate(machines):
-        alt_but = []
-        for but in m.buttons:
-            n_but = []
-            for i in range(len(m.joltage)):
-                if i in but:
-                    n_but.append(1)
+        solver = z3.Optimize()
+        variables = []
+        joltage_var = [None] * len(m.joltage)
+        for name, b in enumerate(m.buttons):
+            var = z3.Int(str(name))
+
+            variables.append(var)
+
+            solver.add(var >= 0)
+
+            for entry in b:
+                if joltage_var[entry] is None:
+                    joltage_var[entry] = var
                 else:
-                    n_but.append(0)
-            alt_but.append(n_but)
-        A = np.array(alt_but).T
+                    joltage_var[entry] = joltage_var[entry] + var
+        
+        for jolt_int, entry in enumerate(m.joltage):
+            if joltage_var[jolt_int] is None:
+                continue
+            solver.add(m.joltage[jolt_int] == joltage_var[jolt_int])
+        
+        total_press = solver.minimize(sum(variables))
 
-        var = cp.Variable(len(alt_but), nonneg=True, integer=True)
-        target = cp.Parameter(len(m.joltage))
-        target.value = np.array(m.joltage)
-        objective = cp.Minimize(cp.sum(A @ var - target))
-        constraints = [var <= sum(m.joltage), A @ var - target >= 0]
-        prob = cp.Problem(objective, constraints)
-        print(prob.solve(), m.joltage, var.value)
-        print(sum(map(round, var.value)))
-        c_result += sum(map(round, var.value))
+        if solver.check() == z3.sat:
+            result += total_press.value().as_long()
+        else:
+            assert False
 
-    print(c_result)
+    print(result)
     
